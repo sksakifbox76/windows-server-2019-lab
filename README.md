@@ -2,7 +2,7 @@
 
 A hands-on homelab built from my MCSA coursework. Each phase deploys and configures a real Windows Server role on VMware Workstation, shows **both the GUI and the PowerShell method**, and keeps screenshots as evidence.
 
-## Phase 1: Deploy and configure the server (this repo)
+## Phase 1: Deploy and configure the server
 
 **MCSA topics:** 1 Deploy Windows Server in VMware, 21 Local server basic configuration
 
@@ -109,6 +109,62 @@ Server Manager confirms the same settings: computer name `DC01`, Ethernet0 `192.
 
 ![Full VMware view of the lab VM](screenshots/13-vmware-full-view.jpg)
 
+## Phase 2.1: Active Directory and DNS
+
+**MCSA topics:** 2 AD DS, 3 DNS
+
+DC01 becomes the first domain controller of a new forest, `lab.local` (NetBIOS name `LAB`). The roles were installed through the Server Manager GUI, and the forest was created with PowerShell.
+
+### Install the roles (GUI)
+
+1. In Server Manager, click **Manage > Add Roles and Features** and continue to **Server Roles**.
+2. Tick **Active Directory Domain Services** and **DNS Server**, accept the added features, and click **Install**.
+
+![Select server roles](screenshots/16-gui-select-server-roles.jpg)
+
+![Role installation progress: AD DS, DNS and management tools](screenshots/17-gui-roles-installation-progress.jpg)
+
+After the install, Server Manager shows the post-deployment warning "Configuration required for Active Directory Domain Services at DC01", with the **Promote this server to a domain controller** link.
+
+![Server Manager promotion prompt](screenshots/15-server-manager-promote-prompt.jpg)
+
+The GUI route continues in the wizard with **Add a new forest** and root domain name `lab.local`.
+
+![AD DS Configuration Wizard, Deployment Configuration](screenshots/22-gui-promotion-wizard-deployment-config.jpg)
+
+### Create the forest (PowerShell)
+
+Because the GUI had already installed the roles, `Install-WindowsFeature` reports `NoChangeNeeded`. On a fresh server it installs them. `Install-ADDSForest` then creates the forest and asks for a DSRM (recovery) password. Both commands are saved as [`scripts/03-adds-dns.ps1`](scripts/03-adds-dns.ps1).
+
+```powershell
+Install-WindowsFeature AD-Domain-Services, DNS -IncludeManagementTools
+
+Install-ADDSForest -DomainName "lab.local" -DomainNetbiosName "LAB" -InstallDns `
+  -SafeModeAdministratorPassword (Read-Host -AsSecureString "DSRM password") -Force
+```
+
+![Install-WindowsFeature result: Success True](screenshots/18-ps-install-windowsfeature.jpg)
+
+![Install-ADDSForest command](screenshots/19-ps-install-addsforest-command.jpg)
+
+![Install-ADDSForest running, with the expected cryptography warning](screenshots/20-ps-install-addsforest-running.jpg)
+
+The warning about "cryptography algorithms compatible with Windows NT 4.0" is the Windows Server 2019 default and is expected. The server restarts by itself when the promotion finishes.
+
+> **Security note:** the DSRM password is typed at the prompt and is never stored in the repo. Passwords visible in the original screenshots were blacked out before publishing.
+
+### Verify
+
+```powershell
+Get-ADDomain | Select Name, DomainMode
+Get-ADDomainController | Select Name, IPv4Address
+Get-DnsServerZone
+```
+
+Result: domain `lab` in `Windows2016Domain` mode, domain controller `DC01` at `192.168.10.10`, and the DNS zones `lab.local` and `_msdcs.lab.local` (both AD-integrated), plus the automatic reverse zones.
+
+![Domain, domain controller and DNS zone verification](screenshots/21-verify-domain-controller-dns.jpg)
+
 ## Issues and fixes
 
 | Problem | Fix |
@@ -117,15 +173,18 @@ Server Manager confirms the same settings: computer name `DC01`, Ethernet0 `192.
 | "Try managing servers with Windows Admin Center" pop-up at first login | Not an error. Tick **Don't show this message again** and close it |
 | Adapter name not `Ethernet0` | Run `Get-NetAdapter` and use the name it shows |
 | Network Connections shows **Unidentified network** | Expected: the host-only network has no gateway and no DHCP |
+| `Install-WindowsFeature` returns `NoChangeNeeded` | The roles are already installed (by the GUI). Carry on with `Install-ADDSForest` |
+| Warning about "cryptography algorithms compatible with Windows NT 4.0" during promotion | Default on Windows Server 2019. No action needed |
 
 ## Roadmap
-
-Next up is installing the AD DS and DNS roles and promoting DC01 to a domain controller (the wizard's first screen is in [`screenshots/14-add-roles-select-server.png`](screenshots/14-add-roles-select-server.png)).
 
 | Phase | Topics | Status |
 | --- | --- | --- |
 | 1 Deploy and configure | 1, 21 | Done |
-| 2 Domain core | AD DS, DNS, DHCP, reserved IP, users and passwords, client access | Next |
+| 2.1 AD DS and DNS | 2, 3 | Done |
+| 2.2 DHCP and reserved IP | 4, 9 | Next |
+| 2.3 Users, groups and passwords | 5 | Planned |
+| 2.4 Client access | 6 | Planned |
 | 3 Multi-site and resilience | DNS zone transfer, RODC, NLB, Hyper-V | Planned |
 | 4 Services and deployment | Software deployment, WDS, remote access, WSUS, IIS | Planned |
 | 5 PKI and federation | AD CS, AD FS | Planned |
@@ -137,6 +196,7 @@ windows-server-2019-lab/
 ├── README.md
 ├── scripts/
 │   ├── 01-basic-config.ps1
-│   └── 02-verify.ps1
+│   ├── 02-verify.ps1
+│   └── 03-adds-dns.ps1
 └── screenshots/
 ```
